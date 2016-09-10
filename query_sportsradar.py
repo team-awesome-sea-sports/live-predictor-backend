@@ -34,16 +34,60 @@ DEFAULT_SEASON_INFO = {
 OUPUT = 'game_pbp.json'
 
 
+# Query database
+# Is there a new play?
+# If so:
+#   parse a result object for updating player score
+#   parse a situation object for displaying on UI
+
+
+# json["quarters"][num]["pbp"]
+
 def main(*args):
     """Run requests against the SportsRadar API."""
     params = {'api_key': KEY}
     game_info = DEFAULT_GAME_INFO
-    season_info = DEFAULT_SEASON_INFO
+
+    latest_play = get_latest_play(game_info, params)
+    print(latest_play)
+    import pdb;pdb.set_trace()
+
+
+def get_latest_play(game_info, params):
+    """Get json information of most recent play."""
+
     response = get_game_pbp(game_info, params)
-    # response = get_season(season_info, params)
-    with open(OUPUT, 'w') as txtfile:
-        json.dump(response.json(), txtfile)
-    # import pdb;pdb.set_trace()
+    current_quarter_idx = 0
+    current_pbp_len = 0
+    current_items_len = 0
+    current_plays_len = 0
+    latest_play = None
+
+    j = response.json()
+    quarters = j["quarters"]
+
+    if len(quarters) > current_quarter_idx:
+
+        # Update any end-of-quarter stuff
+
+        current_quarter_idx = len(quarters) - 1
+
+    quarter = quarters[current_quarter_idx]
+    pbp = quarter["pbp"]
+    if len(pbp) > current_pbp_len:
+        current_pbp_len = len(pbp)
+        latest_drive_or_event = pbp.pop()
+
+        try:
+            plays = latest_drive_or_event["actions"]
+            # import pdb;pdb.set_trace()
+        except:
+            pass
+            # ???
+        else:
+            if len(plays) > current_plays_len:
+                latest_play = plays.pop()
+    return latest_play
 
 
 def get_game_pbp(game_info, params):
