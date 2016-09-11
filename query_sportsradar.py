@@ -28,7 +28,7 @@ KEY = os.environ['SPORTSRADAR_API_KEY']
 ACCESS_KEY = os.environ['GAMESTREAM_ACCESS_KEY']
 SECRET_KEY = os.environ['GAMESTREAM_SECRET_KEY']
 SITUATION_ARN = os.environ['SNS_ARN']
-RESULTS_ARN = os.environ['SQS_ARN']
+SQS_URL = os.environ['SQS_URL']
 
 ACCESS_LEVEL = 't'
 VERSION = '1'
@@ -64,8 +64,8 @@ TEST_GAME_INFO = {
     'year': '2016',
     'season': 'REG',
     'week': '1',
-    'away_team': 'TB',
-    'home_team': 'ATL',
+    'away_team': 'MIA',
+    'home_team': 'SEA',
     'format': FORMAT,
 }
 
@@ -87,6 +87,10 @@ DELAY = 5
 
 def main(*args):
     """Run requests against the SportsRadar API."""
+    sns_client = get_boto_client('sns')
+    print('sns client created')
+    sqs_client = get_boto_client('sqs')
+    print('sqs client created')
     game_info = TEST_GAME_INFO
     params = {'api_key': KEY}
 
@@ -100,33 +104,36 @@ def main(*args):
         game_data = response.json()
         game_id = game_data['id']
         latest_play = get_latest_play(game_data, game_info)
-        if latest_play and latest_play['id'] != latest_play_id:
 
-            current_sequence = next(unique)
-            result, new_sit = parse_play(latest_play)
+        if not latest_play or latest_play['id'] == latest_play_id:
+            print('No latest play.')
+            time.sleep(30)
+            continue
 
-            result['gameID'] = game_id
-            new_sit['gameID'] = game_id
-            result['situationID'] = '-'.join((game_id, str(current_sequence)))
-            new_sit['situationID'] = '-'.join((game_id, str(current_sequence + 1)))
+        current_sequence = next(unique)
+        result, new_sit = parse_play(latest_play)
 
-            latest_play_id = latest_play['id']
-            print('Play result:')
-            print(latest_play['summary'])
-            print('New situation: ')
-            print(new_sit)
+        result['gameID'] = game_id
+        new_sit['gameID'] = game_id
+        result['situationID'] = '-'.join((game_id, str(current_sequence)))
+        new_sit['situationID'] = '-'.join((game_id, str(current_sequence + 1)))
 
-            sns_client = get_sns_client()
-            put_situation_in_sns(new_sit, sns_client)
-            put_result_in_sns(result, sns_client)
+        latest_play_id = latest_play['id']
+        print('Play result:')
+        print(latest_play['summary'])
+        print('New situation: ')
+        print(new_sit)
+
+        send_sns_data(new_sit, sns_client)
+        send_sqs_data(result, sqs_client)
 
         time.sleep(30)
 
 
-def get_sns_client():
+def get_boto_client(service):
     """Set up a boto client for SNS."""
     return boto3.client(
-        'sns',
+        service,
         region_name='us-west-2',
         aws_access_key_id=ACCESS_KEY,
         aws_secret_access_key=SECRET_KEY,
@@ -134,9 +141,9 @@ def get_sns_client():
     )
 
 
-def put_situation_in_sns(situation, client):
+def send_sns_data(data, client):
     """Send a situation to the SNS."""
-    data = json.dumps(situation)
+    data = json.dumps(data)
     return client.publish(
         TopicArn=SITUATION_ARN,
         Message=json.dumps({'default': data}),
@@ -144,13 +151,12 @@ def put_situation_in_sns(situation, client):
     )
 
 
-def put_result_in_sns(result, client):
-    """Send a result to the SNS."""
-    data = json.dumps(result)
-    return client.publish(
-        TopicArn=RESULTS_ARN,
-        Message=json.dumps({'default': data}),
-        MessageStructure='json'
+def send_sqs_data(data, client):
+    """Send a situation to the SNS."""
+    data = json.dumps(data)
+    return client.send_message(
+        QueueUrl=SQS_URL,
+        MessageBody=data,
     )
 
 
