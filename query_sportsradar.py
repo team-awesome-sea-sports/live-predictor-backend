@@ -74,7 +74,7 @@ DEFAULT_GAME_INFO = {
 }
 
 OUPUT = 'game_pbp.json'
-DELAY = 1
+DELAY = 2
 
 
 def main(game_info=LIVE_GAME_INFO):
