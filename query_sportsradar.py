@@ -1,9 +1,21 @@
 """Query data from Sports Radar and emit with necessary fields."""
 
 import os
+import re
 import sys
 import json
 import requests
+
+# Edge cases
+# turnover
+#   returned for TD
+#   overturned
+# fumble recovered by own team
+# touchdown
+#   overturned
+#   kickoff or punt returned for TD
+# blocked punt or FG
+#   returned for TD
 
 KEY = os.environ['SPORTSRADAR_API_KEY']
 ACCESS_LEVEL = 't'
@@ -15,6 +27,14 @@ BASE_NFL_URL = 'http://api.sportradar.us/nfl-{}{}'.format(ACCESS_LEVEL, VERSION)
 SCHEDULE_ROUTE = "{year}/{season}/schedule.{format}"
 GAME_ROUTE = "{year}/{season}/{week}/{away_team}/{home_team}/pbp.{format}"
 
+TEAMS = ['MIN', 'SEA']
+SIDE_STR = r'(?P<side>' + r'|'.join(TEAMS) + r')'
+YARD_GAIN_STR = r'for\s\-?\d{1,3}\syards'
+NEW_YARD_LINE_STR = r'to(\sthe)?\s' + SIDE_STR + r'\s\d{1,2}'
+PENALTY_STR = r'(?P<loss>\d{1,2})\syards,\senforced\sat\s' + SIDE_STR + r'\s(?P<yard_line>\d{1,2})'
+
+YARD_GAIN_PAT = re.compile(YARD_GAIN_STR)
+NEW_YARD_LINE_PAT = re.compile(NEW_YARD_LINE_STR)
 
 DEFAULT_GAME_INFO = {
     'year': '2016',
@@ -46,25 +66,128 @@ OUPUT = 'game_pbp.json'
 def main(*args):
     """Run requests against the SportsRadar API."""
     params = {'api_key': KEY}
-    game_info = DEFAULT_GAME_INFO
 
-    latest_play = get_latest_play(game_info, params)
-    print(latest_play)
-    import pdb;pdb.set_trace()
+    # Will need to get this separately as a one-off
+    # response = get_game_pbp(game_info, params)
+    # game_data = response.json()
+    # latest_play = get_latest_play(game_data, game_info, params)
+    # print(latest_play)
 
 
-def get_latest_play(game_info, params):
+def parse_number_from_summary(summary, pattern):
+    """Parse the new yard line from a given play summary."""
+    match = re.search(pattern, summary)
+    try:
+        match_string = match.group()
+        number_match = re.search(r'\-?\d+', match_string).group()
+        return int(number_match)
+    except AttributeError:
+        raise ValueError(
+            'Summary does not contain number pattern: {}'.format(summary)
+        )
+
+
+def parse_pass_or_rush(play):
+    """Calculate situation for pass or run play."""
+    # if touchdown in summary...
+    # if fumble, recovered by other team?
+
+    summary = play["summary"]
+    try:
+        new_yard_line = parse_number_from_summary(summary, NEW_YARD_LINE_STR)
+    except ValueError:
+        new_yard_line = play['yard_line']
+
+    if 'INTERCEPTED' in summary:
+        return {
+            'down': 1,
+            'distance': 10,
+            'yard_line': new_yard_line,
+        }
+
+    yards_gained = parse_number_from_summary(summary, YARD_GAIN_PAT)
+    if yards_gained >= play['yfd']:
+        new_down = 1
+        new_distance = 10
+    else:
+        new_down = (play['down'] + 1) % 5 or 1
+        new_distance = play['yfd'] - yards_gained
+
+    return {
+        'down': new_down,
+        'distance': new_distance,
+        'yard_line': new_yard_line,
+    }
+
+
+def parse_punt(play):
+    """Parse situation results from a punt play."""
+    summary = play["summary"]
+    result = {'down': 1, 'distance': 10}
+
+    if 'touchback' in summary:
+        result['yard_line'] = 25
+    else:
+        result['yard_line'] = parse_number_from_summary(summary, NEW_YARD_LINE_STR)
+
+    return result
+
+
+def parse_penalty(play):
+    """Get penalty info from play."""
+    summary = play["summary"]
+    match = re.search(PENALTY_STR, summary)
+    try:
+        loss = int(match.groupdict['loss'])
+        enforced_at = int(match.groupdict['yard_line'])
+        new_yard_line = enforced_at - loss
+        return {
+            'yard_line': new_yard_line,
+            'down': play['down'],
+            'distance': play['yfd'] - loss,
+        }
+    except (AttributeError, KeyError, TypeError):
+        raise
+
+
+def parse_kick(play):
+    pass
+
+
+def parse_play(new_yard_line_pat, play):
+    """Return data for the result of the play and the situation for next."""
+    # calculate the next down number
+    #   Different yardage pattern for penalty
+    # calculate next distance
+    # calculate next yardline
+
+    # get the time at start of last play
+    # get score and quarter, easy enough
+
+    play_type = play['play_type']
+    method = globals()['parse_' + play_type]
+
+    new_data = method(play)
+
+    # Different pattern for penalty
+
+    # Check for turnover
+    situation_data = {
+        'clock': play['clock'],
+        'score': play['score'],
+        'quarter': play['quarter'],
+    }
+
+    return play, situation_data
+
+
+def get_latest_play(game_data, game_info, params):
     """Get json information of most recent play."""
-
-    response = get_game_pbp(game_info, params)
     current_quarter_idx = 0
     current_pbp_len = 0
-    current_items_len = 0
-    current_plays_len = 0
-    latest_play = None
-
-    j = response.json()
-    quarters = j["quarters"]
+    current_drive_len = 0
+    latest_play = {}
+    quarters = game_data["quarters"]
 
     if len(quarters) > current_quarter_idx:
 
@@ -76,17 +199,24 @@ def get_latest_play(game_info, params):
     pbp = quarter["pbp"]
     if len(pbp) > current_pbp_len:
         current_pbp_len = len(pbp)
-        latest_drive_or_event = pbp.pop()
+        latest_drive = pbp.pop()
 
         try:
-            plays = latest_drive_or_event["actions"]
-            # import pdb;pdb.set_trace()
+            drive = latest_drive["actions"][:-3]
         except:
             pass
-            # ???
+            # It is the coin toss or some other non-drive item
         else:
-            if len(plays) > current_plays_len:
-                latest_play = plays.pop()
+            if len(drive) > current_drive_len:
+                latest_play = drive.pop()
+    home_team = game_data['home_team']
+    away_team = game_data['away_team']
+
+    latest_play['score'] = {
+        home_team['id']: home_team['points'],
+        away_team['id']: away_team['points']
+    }
+    latest_play['quarter'] = quarter['number']
     return latest_play
 
 
