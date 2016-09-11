@@ -4,8 +4,9 @@ import os
 import re
 import sys
 import json
-from functools import partial
 import requests
+from functools import partial
+from operator import add, sub
 
 # Edge cases
 # turnover
@@ -34,7 +35,10 @@ TEAMS = ['MIN', 'SEA']
 SIDE_STR = r'(?P<side>' + r'|'.join(TEAMS) + r')'
 YARD_GAIN_STR = r'for\s\-?\d{1,3}\syard(s)?'
 NEW_YARD_LINE_STR = r'(to|at)(\sthe)?\s' + SIDE_STR + r'\s\d{1,2}'
-PENALTY_STR = r'(?P<loss>\d{1,2})\syards,\senforced\sat\s' + SIDE_STR + r'\s(?P<yard_line>\d{1,2})'
+
+CULPRIT_STR = r'Penalty\son\s(?P<team>' + r'|'.join(TEAMS) + r')\s\d{1,2}'
+LOSS_STR = r'\s(?P<loss>\d{1,2})\syards,\senforced\sat\s' + SIDE_STR + r'\s(?P<yard_line>\d{1,2})'
+PENALTY_STR = CULPRIT_STR + r'.*' + LOSS_STR
 
 YARD_GAIN_PAT = re.compile(YARD_GAIN_STR)
 NEW_YARD_LINE_PAT = re.compile(NEW_YARD_LINE_STR)
@@ -101,7 +105,7 @@ def parse_pass_or_rush(play):
     except ValueError:
         new_yard_line = play['yard_line']
 
-    if 'Penalty' in summary:
+    if 'Penalty' in summary and 'declined' not in summary:
         return parse_penalty(play)
 
     if 'INTERCEPTED' in summary:
@@ -139,13 +143,14 @@ def parse_pass_or_rush(play):
 def parse_kick_or_punt(play, touchback_yard_line=20):
     """Parse situation results from a punt play."""
     summary = play["summary"]
-    result = {'down': 1, 'distance': 10}
-
-    if 'touchback' in summary:
-        result['yard_line'] = touchback_yard_line
+    if 'Penalty' in summary and 'declined' not in summary:
+        result = parse_penalty(play)
+    elif 'touchback' in summary:
+        result = {'yard_line': touchback_yard_line}
     else:
-        result['yard_line'] = parse_number_from_summary(summary, NEW_YARD_LINE_STR)
+        result = {'yard_line': parse_number_from_summary(summary, NEW_YARD_LINE_STR)}
 
+    result.update({'down': 1, 'distance': 10})
     return result
 
 
@@ -160,26 +165,33 @@ def parse_penalty(play):
     summary = play["summary"]
     match = re.search(PENALTY_STR, summary)
     try:
-        # import pdb;pdb.set_trace()
+        team = match.groupdict()['team']
         loss = int(match.groupdict()['loss'])
+        side = match.groupdict()['side']
         enforced_at = int(match.groupdict()['yard_line'])
-        new_yard_line = enforced_at - loss
+
+        yard_line_func = sub if team == side else add
+        distance_func = sub if team == play['team_on_defense'] else add
+
+        distance = distance_func(play['yfd'], + loss)
+        if distance <= 0:
+            down = 1
+            distance = 10
+        else:
+            down = play['down']
+
         return {
-            'yard_line': new_yard_line,
-            'down': play['down'],
-            'distance': play['yfd'] + loss,
+            'yard_line': yard_line_func(enforced_at, loss),
+            'down': down,
+            'distance': distance,
         }
-    except (AttributeError, KeyError, TypeError):
-        raise
+    except (AttributeError):
+        pass
+        import pdb;pdb.set_trace()
 
 
 def parse_play(new_yard_line_pat, play):
     """Return data for the result of the play and the situation for next."""
-    # calculate the next down number
-    #   Different yardage pattern for penalty
-    # calculate next distance
-    # calculate next yardline
-
     # get the time at start of last play
     # get score and quarter, easy enough
 
@@ -187,8 +199,6 @@ def parse_play(new_yard_line_pat, play):
     method = globals()['parse_' + play_type]
 
     new_data = method(play)
-
-    # Different pattern for penalty
 
     # Check for turnover
     new_data['clock'] = play['clock']
