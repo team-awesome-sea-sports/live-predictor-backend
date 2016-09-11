@@ -85,8 +85,6 @@ DELAY = 5
 #   parse a situation object for displaying on UI
 
 
-# json["quarters"][num]["pbp"]
-
 def main(*args):
     """Run requests against the SportsRadar API."""
     game_info = TEST_GAME_INFO
@@ -99,7 +97,6 @@ def main(*args):
     # while True:
     for _ in range(3):
         response = get_game_pbp(game_info, params)
-        print(response)
         game_data = response.json()
         game_id = game_data['id']
         latest_play = get_latest_play(game_data, game_info)
@@ -121,6 +118,7 @@ def main(*args):
 
             sns_client = get_sns_client()
             put_situation_in_sns(new_sit, sns_client)
+            put_result_in_sns(result, sns_client)
 
         time.sleep(30)
 
@@ -139,17 +137,21 @@ def get_sns_client():
 def put_situation_in_sns(situation, client):
     """Send a situation to the SNS."""
     data = json.dumps(situation)
-    client.publish(
+    return client.publish(
         TopicArn=SITUATION_ARN,
         Message=data,
         MessageStructure='string'
     )
 
 
-def put_result_in_sqs(result, client):
+def put_result_in_sns(result, client):
     """Send a result to the SNS."""
     data = json.dumps(result)
-    client.publish(TopicArn=SQS_ARN, Message=data, MessageStructure='string')
+    return client.publish(
+        TopicArn=RESULTS_ARN,
+        Message=data,
+        MessageStructure='string'
+    )
 
 
 def parse_number_from_summary(summary, pattern):
@@ -291,7 +293,9 @@ def parse_penalty(play):
         }
     except (AttributeError):
         pass
+        print('AttributeError in parse_penalty')
         # import pdb;pdb.set_trace()
+        return {}
 
 
 def touchdown(play):
@@ -319,6 +323,7 @@ def parse_play(play):
     new_data['clock'] = play['clock']
     new_data['score'] = play['score']
     new_data['quarter'] = play['quarter']
+    new_data['side'] = play['side']
     return play, new_data
 
 
@@ -326,10 +331,12 @@ def get_latest_play(game_data, params):
     """Get json information of most recent play."""
     quarters = game_data["quarters"]
 
-    # handle IndexError
-    current_quarter = quarters.pop()
-    pbp = current_quarter["pbp"]
-    latest_drive = pbp.pop()
+    try:
+        current_quarter = quarters.pop()
+        pbp = current_quarter["pbp"]
+        latest_drive = pbp.pop()
+    except (IndexError, KeyError):
+        return
 
     try:
         drive_plays = latest_drive["actions"]
@@ -365,11 +372,11 @@ def get_game_pbp(game_info, params):
     return requests.get(url, params=params)
 
 
-def get_season(season_info, params):
-    schedule_route = SCHEDULE_ROUTE.format(**season_info)
-    url = '/'.join((BASE_NFL_URL, schedule_route))
-    print(url)
-    return requests.get(url, params=params)
+# def get_season(season_info, params):
+#     schedule_route = SCHEDULE_ROUTE.format(**season_info)
+#     url = '/'.join((BASE_NFL_URL, schedule_route))
+#     print(url)
+#     return requests.get(url, params=params)
 
 
 if __name__ == '__main__':
