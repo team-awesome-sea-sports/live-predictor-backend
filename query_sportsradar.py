@@ -13,6 +13,8 @@ from operator import add, sub
 
 # Edge cases
 # turnover
+# fumble for turnover
+# 3-R.Wilson FUMBLES (Aborted) at SEA 44. 47-K.Alonso recovers at the SEA 38. 47-K.Alonso to SEA 35 for 3 yards (79-G.Gilliam).
 #   returned for TD
 #   overturned
 # fumble recovered by own team
