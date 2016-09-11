@@ -319,18 +319,14 @@ def parse_play(play):
     # get the time at start of last play
     # get score and quarter, easy enough
 
-    play_result = {
-        'touchdown': True,
-        'turnover': False,
-    }
-    new_data = play_result.copy()
+    play.update({'touchdown': False, 'turnover': False})
 
     if 'touchdown' in play['summary']:
-        new_data.update(touchdown(play))
-        play_result['touchdown'] = True
+        new_data = touchdown(play)
+        play['touchdown'] = True
     else:
         method = globals()['parse_' + play['play_type']]
-        new_data.update(method(play))
+        new_data = method(play)
 
     # Check for turnover
     new_data['clock'] = play['clock']
@@ -342,10 +338,10 @@ def parse_play(play):
         try:
             summary = play['summary']
             yards_gained = parse_number_from_summary(summary, YARD_GAIN_PAT)
-            play_result['distance'] = 'Long' if yards_gained > 11 else 'Short'
+            play['distance'] = 'Long' if yards_gained > 11 else 'Short'
         except ValueError:
             pass
-    return play_result, new_data
+    return play, new_data
 
 
 def get_latest_play(game_data, params):
