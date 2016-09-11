@@ -22,8 +22,6 @@ from operator import add, sub
 # blocked punt or FG
 #   returned for TD
 
-# squence 153
-
 API_KEY = os.environ['SPORTSRADAR_API_KEY']
 ACCESS_KEY = os.environ['AWS_ACCESS_KEY']
 SECRET_KEY = os.environ['AWS_SECRET_KEY']
@@ -35,8 +33,6 @@ VERSION = '1'
 FORMAT = 'json'
 
 BASE_NFL_URL = 'http://api.sportradar.us/nfl-{}{}'.format(ACCESS_LEVEL, VERSION)
-
-SCHEDULE_ROUTE = "{year}/{season}/schedule.{format}"
 GAME_ROUTE = "{year}/{season}/{week}/{away_team}/{home_team}/pbp.{format}"
 
 TEAMS = ['MIN', 'SEA', 'TB', 'ATL', 'MIA', 'NE', 'ARI']
@@ -51,7 +47,7 @@ PENALTY_STR = CULPRIT_STR + r'.*' + LOSS_STR
 YARD_GAIN_PAT = re.compile(YARD_GAIN_STR)
 NEW_YARD_LINE_PAT = re.compile(NEW_YARD_LINE_STR)
 
-DEFAULT_GAME_INFO = {
+TEST_GAME_INFO = {
     'year': '2016',
     'season': 'PRE',
     'week': '2',
@@ -60,7 +56,7 @@ DEFAULT_GAME_INFO = {
     'format': FORMAT,
 }
 
-TEST_GAME_INFO = {
+LIVE_GAME_INFO = {
     'year': '2016',
     'season': 'REG',
     'week': '1',
@@ -69,20 +65,8 @@ TEST_GAME_INFO = {
     'format': FORMAT,
 }
 
-DEFAULT_SEASON_INFO = {
-    'year': '2016',
-    'season': 'REG',
-    'format': FORMAT,
-}
-
 OUPUT = 'game_pbp.json'
 DELAY = 5
-
-# Query database
-# Is there a new play?
-# If so:
-#   parse a result object for updating player score
-#   parse a situation object for displaying on UI
 
 
 def main(*args):
@@ -91,7 +75,7 @@ def main(*args):
     print('sns client created')
     sqs_client = get_boto_client('sqs')
     print('sqs client created')
-    game_info = TEST_GAME_INFO
+    game_info = LIVE_GAME_INFO
     params = {'api_key': API_KEY}
 
     unique = count()
@@ -318,7 +302,6 @@ def touchdown(play):
 def parse_play(play):
     """Return data for the result of the play and the situation for next."""
     # get the time at start of last play
-    # get score and quarter, easy enough
 
     play.update({'touchdown': False, 'turnover': False})
 
@@ -388,13 +371,6 @@ def get_game_pbp(game_info, params):
     game_route = GAME_ROUTE.format(**game_info)
     url = '/'.join((BASE_NFL_URL, game_route))
     return requests.get(url, params=params)
-
-
-# def get_season(season_info, params):
-#     schedule_route = SCHEDULE_ROUTE.format(**season_info)
-#     url = '/'.join((BASE_NFL_URL, schedule_route))
-#     print(url)
-#     return requests.get(url, params=params)
 
 
 if __name__ == '__main__':
