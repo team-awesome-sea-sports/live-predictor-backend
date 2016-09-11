@@ -99,7 +99,7 @@ def main(*args):
     latest_play_id = ''
 
     # while True:
-    for _ in range(5):
+    for _ in range(20):
         response = get_game_pbp(game_info, params)
         game_data = response.json()
         game_id = game_data['id']
@@ -301,9 +301,7 @@ def parse_penalty(play):
             'yfd': yfd,
         }
     except (AttributeError):
-        pass
         print('AttributeError in parse_penalty')
-        # import pdb;pdb.set_trace()
         return {}
 
 
@@ -321,12 +319,18 @@ def parse_play(play):
     # get the time at start of last play
     # get score and quarter, easy enough
 
+    play_result = {
+        'touchdown': True,
+        'turnover': False,
+    }
+    new_data = play_result.copy()
+
     if 'touchdown' in play['summary']:
-        new_data = touchdown(play)
+        new_data.update(touchdown(play))
+        play_result['touchdown'] = True
     else:
-        play_type = play['play_type']
-        method = globals()['parse_' + play_type]
-        new_data = method(play)
+        method = globals()['parse_' + play['play_type']]
+        new_data.update(method(play))
 
     # Check for turnover
     new_data['clock'] = play['clock']
@@ -338,10 +342,10 @@ def parse_play(play):
         try:
             summary = play['summary']
             yards_gained = parse_number_from_summary(summary, YARD_GAIN_PAT)
-            play['distance'] = 'Long' if yards_gained > 11 else 'Short'
+            play_result['distance'] = 'Long' if yards_gained > 11 else 'Short'
         except ValueError:
             pass
-    return play, new_data
+    return play_result, new_data
 
 
 def get_latest_play(game_data, params):
