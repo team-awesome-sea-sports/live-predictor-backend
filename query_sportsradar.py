@@ -4,7 +4,9 @@ import os
 import re
 import sys
 import json
+import time
 import requests
+from itertools import count
 from functools import partial
 from operator import add, sub
 
@@ -52,6 +54,15 @@ DEFAULT_GAME_INFO = {
     'format': FORMAT,
 }
 
+TEST_GAME_INFO = {
+    'year': '2016',
+    'season': 'REG',
+    'week': '1',
+    'away_team': 'TB',
+    'home_team': 'ATL',
+    'format': FORMAT,
+}
+
 DEFAULT_SEASON_INFO = {
     'year': '2016',
     'season': 'REG',
@@ -59,7 +70,7 @@ DEFAULT_SEASON_INFO = {
 }
 
 OUPUT = 'game_pbp.json'
-
+DELAY = 5
 
 # Query database
 # Is there a new play?
@@ -72,13 +83,36 @@ OUPUT = 'game_pbp.json'
 
 def main(*args):
     """Run requests against the SportsRadar API."""
+    game_info = TEST_GAME_INFO
     params = {'api_key': KEY}
 
-    # Will need to get this separately as a one-off
-    # response = get_game_pbp(game_info, params)
-    # game_data = response.json()
-    # latest_play = get_latest_play(game_data, game_info, params)
-    # print(latest_play)
+    unique = count()
+
+    latest_play_id = ''
+
+    # while True:
+    for _ in range(3):
+        response = get_game_pbp(game_info, params)
+        print(response)
+        game_data = response.json()
+        game_id = game_data['id']
+        latest_play = get_latest_play(game_data, game_info)
+        if latest_play and latest_play['id'] != latest_play_id:
+
+            current_sequence = next(unique)
+            # parse play result and situation
+            result, new_sit = parse_play(latest_play)
+
+            result['situationID'] = '-'.join((game_id, str(current_sequence)))
+            new_sit['situationID'] = '-'.join((game_id, str(current_sequence + 1)))
+
+            # Put it in the queue!
+            latest_play_id = latest_play['id']
+            print('Play result:')
+            print(latest_play['summary'])
+            print('New situation: ')
+            print(new_sit)
+        time.sleep(DELAY)
 
 
 def parse_number_from_summary(summary, pattern):
@@ -220,7 +254,7 @@ def parse_penalty(play):
         }
     except (AttributeError):
         pass
-        import pdb;pdb.set_trace()
+        # import pdb;pdb.set_trace()
 
 
 def touchdown(play):
@@ -232,7 +266,7 @@ def touchdown(play):
     }
 
 
-def parse_play(new_yard_line_pat, play):
+def parse_play(play):
     """Return data for the result of the play and the situation for next."""
     # get the time at start of last play
     # get score and quarter, easy enough
@@ -248,54 +282,52 @@ def parse_play(new_yard_line_pat, play):
     new_data['clock'] = play['clock']
     new_data['score'] = play['score']
     new_data['quarter'] = play['quarter']
+    new_data['gameID'] = play['id']
 
     return play, new_data
 
 
-def get_latest_play(game_data, game_info, params):
+def get_latest_play(game_data, params):
     """Get json information of most recent play."""
-    current_quarter_idx = 0
-    current_pbp_len = 0
-    current_drive_len = 0
-    latest_play = {}
     quarters = game_data["quarters"]
 
-    if len(quarters) > current_quarter_idx:
+    # handle IndexError
+    current_quarter = quarters.pop()
+    pbp = current_quarter["pbp"]
+    latest_drive = pbp.pop()
 
-        # Update any end-of-quarter stuff
-
-        current_quarter_idx = len(quarters) - 1
-
-    quarter = quarters[current_quarter_idx]
-    pbp = quarter["pbp"]
-    if len(pbp) > current_pbp_len:
-        current_pbp_len = len(pbp)
-        latest_drive = pbp.pop()
-
-        try:
-            drive = latest_drive["actions"][:-3]
-        except:
-            pass
-            # It is the coin toss or some other non-drive item
-        else:
-            if len(drive) > current_drive_len:
-                latest_play = drive.pop()
+    try:
+        drive_plays = latest_drive["actions"]
+    except KeyError:
+        pass
+        # It is the coin toss or some other non-drive item
+        return
+    else:
+        play = drive_plays.pop()
+        # Might be an event e.g. TV time out
+        if play['type'] != 'play':
+            return
+    play['gameID'] = game_data['id']
     home_team = game_data['home_team']
     away_team = game_data['away_team']
+    play['team_on_offense'] = latest_drive['team']
 
-    latest_play['score'] = {
+    if latest_drive['team'] == home_team['id']:
+        play['team_on_defense'] = away_team['id']
+    else:
+        play['team_on_defense'] = home_team['id']
+    play['score'] = {
         home_team['id']: home_team['points'],
-        away_team['id']: away_team['points']
+        away_team['id']: away_team['points'],
     }
-    latest_play['quarter'] = quarter['number']
-    return latest_play
+    play['quarter'] = current_quarter['number']
+    return play
 
 
 def get_game_pbp(game_info, params):
     """Get json for a given game ID."""
     game_route = GAME_ROUTE.format(**game_info)
     url = '/'.join((BASE_NFL_URL, game_route))
-    print(url)
     return requests.get(url, params=params)
 
 
