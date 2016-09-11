@@ -24,10 +24,10 @@ from operator import add, sub
 
 # squence 153
 
-KEY = os.environ['SPORTSRADAR_API_KEY']
-ACCESS_KEY = os.environ['GAMESTREAM_ACCESS_KEY']
-SECRET_KEY = os.environ['GAMESTREAM_SECRET_KEY']
-SITUATION_ARN = os.environ['SNS_ARN']
+API_KEY = os.environ['SPORTSRADAR_API_KEY']
+ACCESS_KEY = os.environ['AWS_ACCESS_KEY']
+SECRET_KEY = os.environ['AWS_SECRET_KEY']
+SNS_ARN = os.environ['SNS_ARN']
 SQS_URL = os.environ['SQS_URL']
 
 ACCESS_LEVEL = 't'
@@ -92,21 +92,22 @@ def main(*args):
     sqs_client = get_boto_client('sqs')
     print('sqs client created')
     game_info = TEST_GAME_INFO
-    params = {'api_key': KEY}
+    params = {'api_key': API_KEY}
 
     unique = count()
 
     latest_play_id = ''
 
-    # while True:
-    for _ in range(20):
+    while True:
         response = get_game_pbp(game_info, params)
         game_data = response.json()
+        if game_data.get('status') == 'closed':
+            break
         game_id = game_data['id']
-        # try:
-        latest_play = get_latest_play(game_data, game_info)
-        # except:
-        #     latest_play = {}
+        try:
+            latest_play = get_latest_play(game_data, game_info)
+        except:
+            latest_play = {}
 
         if not latest_play or latest_play['id'] == latest_play_id:
             print('No latest play.')
@@ -148,7 +149,7 @@ def send_sns_data(data, client):
     """Send a situation to the SNS."""
     data = json.dumps(data)
     return client.publish(
-        TopicArn=SITUATION_ARN,
+        TopicArn=SNS_ARN,
         Message=json.dumps({'default': data}),
         MessageStructure='json'
     )
