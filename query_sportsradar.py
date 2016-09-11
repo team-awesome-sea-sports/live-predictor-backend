@@ -62,22 +62,27 @@ LIVE_GAME_INFO = {
     'year': '2016',
     'season': 'REG',
     'week': '1',
-    'away_team': 'MIA',
-    'home_team': 'SEA',
+    'away_team': 'NE',
+    'home_team': 'ARI',
+    'format': FORMAT,
+}
+
+DEFAULT_GAME_INFO = {
+    'year': '2016',
+    'season': 'REG',
     'format': FORMAT,
 }
 
 OUPUT = 'game_pbp.json'
-DELAY = 15
+DELAY = 1
 
 
-def main(*args):
+def main(game_info=LIVE_GAME_INFO):
     """Run requests against the SportsRadar API."""
     sns_client = get_boto_client('sns')
     print('sns client created')
     sqs_client = get_boto_client('sqs')
     print('sqs client created')
-    game_info = LIVE_GAME_INFO
     params = {'api_key': API_KEY}
 
     unique = count()
@@ -384,6 +389,16 @@ def get_game_pbp(game_info, params):
 
 
 if __name__ == '__main__':
-    args = sys.argv
-
-    main(*args[1:])
+    args = sys.argv[1:]
+    try:
+        week, away_team, home_team = args
+    except ValueError:
+        print(
+            'Usage:\n'
+            'python query_sportsradar.py <week> <away_team> <home_team>\n'
+            '<week> must be a number. <away_team> and <home_team> must be '
+            'NFL standard 2 or 3 uppercase letter abbreviations of teams.'
+        )
+        sys.exit()
+    game_info = dict(week=week, away_team=away_team, home_team=home_team)
+    main(game_info)
