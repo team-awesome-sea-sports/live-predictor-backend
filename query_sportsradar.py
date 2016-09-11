@@ -139,8 +139,8 @@ def put_situation_in_sns(situation, client):
     data = json.dumps(situation)
     return client.publish(
         TopicArn=SITUATION_ARN,
-        Message=data,
-        MessageStructure='string'
+        Message=json.dumps({'default': data}),
+        MessageStructure='json'
     )
 
 
@@ -149,8 +149,8 @@ def put_result_in_sns(result, client):
     data = json.dumps(result)
     return client.publish(
         TopicArn=RESULTS_ARN,
-        Message=data,
-        MessageStructure='string'
+        Message=json.dumps({'default': data}),
+        MessageStructure='json'
     )
 
 
@@ -201,7 +201,6 @@ def parse_pass_or_rush(play):
         if new_down:
             new_distance = play['yfd'] - yards_gained
         else:
-            # turnover on downs -- report change in possession
             new_down = 1
             new_distance = 10
             team_on_offense = play['team_on_defense']
