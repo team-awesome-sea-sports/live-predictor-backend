@@ -96,10 +96,10 @@ def parse_number_from_summary(summary, pattern):
 
 def parse_pass_or_rush(play):
     """Calculate situation for pass or run play."""
-    # if touchdown in summary...
     # if fumble, recovered by other team?
 
     summary = play["summary"]
+    team_on_offense = play['team_on_offense']
     try:
         new_yard_line = parse_number_from_summary(summary, NEW_YARD_LINE_STR)
     except ValueError:
@@ -108,7 +108,7 @@ def parse_pass_or_rush(play):
     if 'Penalty' in summary and 'declined' not in summary:
         return parse_penalty(play)
 
-    if 'INTERCEPTED' in summary:
+    elif 'INTERCEPTED' in summary:
         return {
             'down': 1,
             'distance': 10,
@@ -125,18 +125,22 @@ def parse_pass_or_rush(play):
         new_distance = 10
     else:
         new_down = (play['down'] + 1) % 5
-        # turnover on downs -- report change in possession
         if new_down:
             new_distance = play['yfd'] - yards_gained
         else:
+            # turnover on downs -- report change in possession
             new_down = 1
             new_distance = 10
+            team_on_offense = play['team_on_defense']
+
+    if team_on_offense != play['side']:
+        new_distance = min(new_distance, new_yard_line)
 
     return {
         'down': new_down,
         'distance': new_distance,
         'yard_line': new_yard_line,
-        'team_on_offense': play['team_on_offense'],
+        'team_on_offense': team_on_offense,
     }
 
 
@@ -160,6 +164,32 @@ parse_punt = partial(parse_kick_or_punt, touchback_yard_line=20)
 parse_kick = partial(parse_kick_or_punt, touchback_yard_line=25)
 
 
+def parse_extrapoint(play):
+    """Return results of extra point/two-point conversion play."""
+    return {
+        'yard_line': 35,
+        'down': 'Kickoff',
+        'distance': 'Kickoff',
+    }
+
+
+def parse_fieldgoal(play):
+    """Return results of field goal play."""
+    # handle penalty on field goal
+    # handle blocked/missed field goal
+    if "No Good" in play['summary']:
+        return {
+            'yard_line': play['yard_line'],
+            'down': 1,
+            'distance': 10,
+        }
+    return {
+        'yard_line': 35,
+        'down': 'Kickoff',
+        'distance': 'Kickoff',
+    }
+
+
 def parse_penalty(play):
     """Get penalty info from play."""
     summary = play["summary"]
@@ -171,8 +201,11 @@ def parse_penalty(play):
         enforced_at = int(match.groupdict()['yard_line'])
 
         yard_line_func = sub if team == side else add
-        distance_func = sub if team == play['team_on_defense'] else add
+        new_yard_line = yard_line_func(enforced_at, loss)
+        if new_yard_line > 50:
+            new_yard_line = 50 - (new_yard_line - 50)
 
+        distance_func = sub if team == play['team_on_defense'] else add
         distance = distance_func(play['yfd'], + loss)
         if distance <= 0:
             down = 1
@@ -181,7 +214,7 @@ def parse_penalty(play):
             down = play['down']
 
         return {
-            'yard_line': yard_line_func(enforced_at, loss),
+            'yard_line': new_yard_line,
             'down': down,
             'distance': distance,
         }
@@ -190,15 +223,26 @@ def parse_penalty(play):
         import pdb;pdb.set_trace()
 
 
+def touchdown(play):
+    """Return data resulting from touchdown."""
+    return {
+        'yard_line': 'Extra Point Conversion',
+        'down': 'Extra Point Conversion',
+        'distance': 'Extra Point Conversion',
+    }
+
+
 def parse_play(new_yard_line_pat, play):
     """Return data for the result of the play and the situation for next."""
     # get the time at start of last play
     # get score and quarter, easy enough
 
-    play_type = play['play_type']
-    method = globals()['parse_' + play_type]
-
-    new_data = method(play)
+    if 'touchdown' in play['summary']:
+        new_data = touchdown(play)
+    else:
+        play_type = play['play_type']
+        method = globals()['parse_' + play_type]
+        new_data = method(play)
 
     # Check for turnover
     new_data['clock'] = play['clock']
