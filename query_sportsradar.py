@@ -5,6 +5,7 @@ import re
 import sys
 import json
 import time
+import boto3
 import requests
 from itertools import count
 from functools import partial
@@ -24,6 +25,10 @@ from operator import add, sub
 # squence 153
 
 KEY = os.environ['SPORTSRADAR_API_KEY']
+ACCESS_KEY = os.environ['SITUATION_ACCESS_KEY']
+SECRET_KEY = os.environ['SITUATION_SECRET_KEY']
+ARN = os.environ['SITUATION_ARN']
+
 ACCESS_LEVEL = 't'
 VERSION = '1'
 FORMAT = 'json'
@@ -33,7 +38,7 @@ BASE_NFL_URL = 'http://api.sportradar.us/nfl-{}{}'.format(ACCESS_LEVEL, VERSION)
 SCHEDULE_ROUTE = "{year}/{season}/schedule.{format}"
 GAME_ROUTE = "{year}/{season}/{week}/{away_team}/{home_team}/pbp.{format}"
 
-TEAMS = ['MIN', 'SEA']
+TEAMS = ['MIN', 'SEA', 'TB', 'ATL', 'MIA', 'NE', 'ARI']
 SIDE_STR = r'(?P<side>' + r'|'.join(TEAMS) + r')'
 YARD_GAIN_STR = r'for\s\-?\d{1,3}\syard(s)?'
 NEW_YARD_LINE_STR = r'(to|at)(\sthe)?\s' + SIDE_STR + r'\s\d{1,2}'
@@ -91,7 +96,7 @@ def main(*args):
     latest_play_id = ''
 
     # while True:
-    for _ in range(3):
+    for _ in range(1):
         response = get_game_pbp(game_info, params)
         print(response)
         game_data = response.json()
@@ -103,6 +108,8 @@ def main(*args):
             # parse play result and situation
             result, new_sit = parse_play(latest_play)
 
+            result['gameID'] = game_id
+            new_sit['gameID'] = game_id
             result['situationID'] = '-'.join((game_id, str(current_sequence)))
             new_sit['situationID'] = '-'.join((game_id, str(current_sequence + 1)))
 
@@ -112,7 +119,24 @@ def main(*args):
             print(latest_play['summary'])
             print('New situation: ')
             print(new_sit)
+
+            put_situation_in_sns(new_sit)
+
         time.sleep(DELAY)
+
+
+def put_situation_in_sns(situation):
+    """Send a situation to the SNS."""
+    data = json.dumps(situation)
+
+    sns_client = boto3.client(
+        'sns',
+        region_name='us-west-2',
+        aws_access_key_id=ACCESS_KEY,
+        aws_secret_access_key=SECRET_KEY,
+        use_ssl=True,
+    )
+    sns_client.publish(TopicArn=ARN, Message=data, MessageStructure='string')
 
 
 def parse_number_from_summary(summary, pattern):
@@ -282,8 +306,6 @@ def parse_play(play):
     new_data['clock'] = play['clock']
     new_data['score'] = play['score']
     new_data['quarter'] = play['quarter']
-    new_data['gameID'] = play['id']
-
     return play, new_data
 
 
@@ -307,7 +329,6 @@ def get_latest_play(game_data, params):
         # Might be an event e.g. TV time out
         if play['type'] != 'play':
             return
-    play['gameID'] = game_data['id']
     home_team = game_data['home_team']
     away_team = game_data['away_team']
     play['team_on_offense'] = latest_drive['team']
