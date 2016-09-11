@@ -400,5 +400,7 @@ if __name__ == '__main__':
             'NFL standard 2 or 3 uppercase letter abbreviations of teams.'
         )
         sys.exit()
-    game_info = dict(week=week, away_team=away_team, home_team=home_team)
+    game_info = DEFAULT_GAME_INFO.copy()
+    game_info.update(dict(week=week, away_team=away_team, home_team=home_team))
+
     main(game_info)
