@@ -25,9 +25,10 @@ from operator import add, sub
 # squence 153
 
 KEY = os.environ['SPORTSRADAR_API_KEY']
-ACCESS_KEY = os.environ['SITUATION_ACCESS_KEY']
-SECRET_KEY = os.environ['SITUATION_SECRET_KEY']
-ARN = os.environ['SITUATION_ARN']
+ACCESS_KEY = os.environ['GAMESTREAM_ACCESS_KEY']
+SECRET_KEY = os.environ['GAMESTREAM_SECRET_KEY']
+SITUATION_ARN = os.environ['SNS_ARN']
+RESULTS_ARN = os.environ['SQS_ARN']
 
 ACCESS_LEVEL = 't'
 VERSION = '1'
@@ -96,7 +97,7 @@ def main(*args):
     latest_play_id = ''
 
     # while True:
-    for _ in range(1):
+    for _ in range(3):
         response = get_game_pbp(game_info, params)
         print(response)
         game_data = response.json()
@@ -105,7 +106,6 @@ def main(*args):
         if latest_play and latest_play['id'] != latest_play_id:
 
             current_sequence = next(unique)
-            # parse play result and situation
             result, new_sit = parse_play(latest_play)
 
             result['gameID'] = game_id
@@ -113,30 +113,43 @@ def main(*args):
             result['situationID'] = '-'.join((game_id, str(current_sequence)))
             new_sit['situationID'] = '-'.join((game_id, str(current_sequence + 1)))
 
-            # Put it in the queue!
             latest_play_id = latest_play['id']
             print('Play result:')
             print(latest_play['summary'])
             print('New situation: ')
             print(new_sit)
 
-            put_situation_in_sns(new_sit)
+            sns_client = get_sns_client()
+            put_situation_in_sns(new_sit, sns_client)
 
-        time.sleep(DELAY)
+        time.sleep(30)
 
 
-def put_situation_in_sns(situation):
-    """Send a situation to the SNS."""
-    data = json.dumps(situation)
-
-    sns_client = boto3.client(
+def get_sns_client():
+    """Set up a boto client for SNS."""
+    return boto3.client(
         'sns',
         region_name='us-west-2',
         aws_access_key_id=ACCESS_KEY,
         aws_secret_access_key=SECRET_KEY,
         use_ssl=True,
     )
-    sns_client.publish(TopicArn=ARN, Message=data, MessageStructure='string')
+
+
+def put_situation_in_sns(situation, client):
+    """Send a situation to the SNS."""
+    data = json.dumps(situation)
+    client.publish(
+        TopicArn=SITUATION_ARN,
+        Message=data,
+        MessageStructure='string'
+    )
+
+
+def put_result_in_sqs(result, client):
+    """Send a result to the SNS."""
+    data = json.dumps(result)
+    client.publish(TopicArn=SQS_ARN, Message=data, MessageStructure='string')
 
 
 def parse_number_from_summary(summary, pattern):
