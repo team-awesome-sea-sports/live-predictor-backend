@@ -66,7 +66,7 @@ LIVE_GAME_INFO = {
 }
 
 OUPUT = 'game_pbp.json'
-DELAY = 5
+DELAY = 15
 
 
 def main(*args):
@@ -90,17 +90,25 @@ def main(*args):
         game_id = game_data['id']
         try:
             latest_play = get_latest_play(game_data, game_info)
-        except:
+        except Exception as e:
+            print('Error trying to get latest play:')
+            print(e)
             latest_play = {}
 
         if not latest_play or latest_play['id'] == latest_play_id:
             print('No latest play.')
-            time.sleep(30)
+            time.sleep(DELAY)
+            continue
+
+        try:
+            result, new_sit = parse_play(latest_play)
+        except Exception as e:
+            print('Error trying to parse latest play:')
+            print(e)
+            time.sleep(DELAY)
             continue
 
         current_sequence = next(unique)
-        result, new_sit = parse_play(latest_play)
-
         result['gameID'] = game_id
         new_sit['gameID'] = game_id
         result['situationID'] = '-'.join((game_id, str(current_sequence)))
@@ -115,7 +123,7 @@ def main(*args):
         send_sns_data(new_sit, sns_client)
         send_sqs_data(result, sqs_client)
 
-        time.sleep(30)
+        time.sleep(DELAY)
 
 
 def get_boto_client(service):
