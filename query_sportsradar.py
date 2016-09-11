@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import json
+from functools import partial
 import requests
 
 # Edge cases
@@ -17,6 +18,8 @@ import requests
 # blocked punt or FG
 #   returned for TD
 
+# squence 153
+
 KEY = os.environ['SPORTSRADAR_API_KEY']
 ACCESS_LEVEL = 't'
 VERSION = '1'
@@ -29,8 +32,8 @@ GAME_ROUTE = "{year}/{season}/{week}/{away_team}/{home_team}/pbp.{format}"
 
 TEAMS = ['MIN', 'SEA']
 SIDE_STR = r'(?P<side>' + r'|'.join(TEAMS) + r')'
-YARD_GAIN_STR = r'for\s\-?\d{1,3}\syards'
-NEW_YARD_LINE_STR = r'to(\sthe)?\s' + SIDE_STR + r'\s\d{1,2}'
+YARD_GAIN_STR = r'for\s\-?\d{1,3}\syard(s)?'
+NEW_YARD_LINE_STR = r'(to|at)(\sthe)?\s' + SIDE_STR + r'\s\d{1,2}'
 PENALTY_STR = r'(?P<loss>\d{1,2})\syards,\senforced\sat\s' + SIDE_STR + r'\s(?P<yard_line>\d{1,2})'
 
 YARD_GAIN_PAT = re.compile(YARD_GAIN_STR)
@@ -98,39 +101,58 @@ def parse_pass_or_rush(play):
     except ValueError:
         new_yard_line = play['yard_line']
 
+    if 'Penalty' in summary:
+        return parse_penalty(play)
+
     if 'INTERCEPTED' in summary:
         return {
             'down': 1,
             'distance': 10,
             'yard_line': new_yard_line,
+            'team_on_offense': play['team_on_defense'],
         }
 
-    yards_gained = parse_number_from_summary(summary, YARD_GAIN_PAT)
+    try:
+        yards_gained = parse_number_from_summary(summary, YARD_GAIN_PAT)
+    except ValueError:
+        yards_gained = 0
     if yards_gained >= play['yfd']:
         new_down = 1
         new_distance = 10
     else:
-        new_down = (play['down'] + 1) % 5 or 1
-        new_distance = play['yfd'] - yards_gained
+        new_down = (play['down'] + 1) % 5
+        # turnover on downs -- report change in possession
+        if new_down:
+            new_distance = play['yfd'] - yards_gained
+        else:
+            new_down = 1
+            new_distance = 10
 
     return {
         'down': new_down,
         'distance': new_distance,
         'yard_line': new_yard_line,
+        'team_on_offense': play['team_on_offense'],
     }
 
 
-def parse_punt(play):
+def parse_kick_or_punt(play, touchback_yard_line=20):
     """Parse situation results from a punt play."""
     summary = play["summary"]
     result = {'down': 1, 'distance': 10}
 
     if 'touchback' in summary:
-        result['yard_line'] = 25
+        result['yard_line'] = touchback_yard_line
     else:
         result['yard_line'] = parse_number_from_summary(summary, NEW_YARD_LINE_STR)
 
     return result
+
+
+parse_rush = parse_pass_or_rush
+parse_pass = parse_pass_or_rush
+parse_punt = partial(parse_kick_or_punt, touchback_yard_line=20)
+parse_kick = partial(parse_kick_or_punt, touchback_yard_line=25)
 
 
 def parse_penalty(play):
@@ -138,20 +160,17 @@ def parse_penalty(play):
     summary = play["summary"]
     match = re.search(PENALTY_STR, summary)
     try:
-        loss = int(match.groupdict['loss'])
-        enforced_at = int(match.groupdict['yard_line'])
+        # import pdb;pdb.set_trace()
+        loss = int(match.groupdict()['loss'])
+        enforced_at = int(match.groupdict()['yard_line'])
         new_yard_line = enforced_at - loss
         return {
             'yard_line': new_yard_line,
             'down': play['down'],
-            'distance': play['yfd'] - loss,
+            'distance': play['yfd'] + loss,
         }
     except (AttributeError, KeyError, TypeError):
         raise
-
-
-def parse_kick(play):
-    pass
 
 
 def parse_play(new_yard_line_pat, play):
@@ -172,13 +191,11 @@ def parse_play(new_yard_line_pat, play):
     # Different pattern for penalty
 
     # Check for turnover
-    situation_data = {
-        'clock': play['clock'],
-        'score': play['score'],
-        'quarter': play['quarter'],
-    }
+    new_data['clock'] = play['clock']
+    new_data['score'] = play['score']
+    new_data['quarter'] = play['quarter']
 
-    return play, situation_data
+    return play, new_data
 
 
 def get_latest_play(game_data, game_info, params):
