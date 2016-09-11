@@ -99,11 +99,14 @@ def main(*args):
     latest_play_id = ''
 
     # while True:
-    for _ in range(3):
+    for _ in range(5):
         response = get_game_pbp(game_info, params)
         game_data = response.json()
         game_id = game_data['id']
+        # try:
         latest_play = get_latest_play(game_data, game_info)
+        # except:
+        #     latest_play = {}
 
         if not latest_play or latest_play['id'] == latest_play_id:
             print('No latest play.')
@@ -190,7 +193,7 @@ def parse_pass_or_rush(play):
     elif 'INTERCEPTED' in summary:
         return {
             'down': 1,
-            'distance': 10,
+            'yfd': 10,
             'yard_line': new_yard_line,
             'team_on_offense': play['team_on_defense'],
         }
@@ -199,24 +202,25 @@ def parse_pass_or_rush(play):
         yards_gained = parse_number_from_summary(summary, YARD_GAIN_PAT)
     except ValueError:
         yards_gained = 0
+
     if yards_gained >= play['yfd']:
         new_down = 1
-        new_distance = 10
+        new_yfd = 10
     else:
         new_down = (play['down'] + 1) % 5
         if new_down:
-            new_distance = play['yfd'] - yards_gained
+            new_yfd = play['yfd'] - yards_gained
         else:
             new_down = 1
-            new_distance = 10
+            new_yfd = 10
             team_on_offense = play['team_on_defense']
 
     if team_on_offense != play['side']:
-        new_distance = min(new_distance, new_yard_line)
+        new_yfd = min(new_yfd, new_yard_line)
 
     return {
         'down': new_down,
-        'distance': new_distance,
+        'yfd': new_yfd,
         'yard_line': new_yard_line,
         'team_on_offense': team_on_offense,
     }
@@ -232,7 +236,7 @@ def parse_kick_or_punt(play, touchback_yard_line=20):
     else:
         result = {'yard_line': parse_number_from_summary(summary, NEW_YARD_LINE_STR)}
 
-    result.update({'down': 1, 'distance': 10})
+    result.update({'down': 1, 'yfd': 10})
     return result
 
 
@@ -247,7 +251,7 @@ def parse_extrapoint(play):
     return {
         'yard_line': 35,
         'down': 'Kickoff',
-        'distance': 'Kickoff',
+        'yfd': 'Kickoff',
     }
 
 
@@ -259,12 +263,12 @@ def parse_fieldgoal(play):
         return {
             'yard_line': play['yard_line'],
             'down': 1,
-            'distance': 10,
+            'yfd': 10,
         }
     return {
         'yard_line': 35,
         'down': 'Kickoff',
-        'distance': 'Kickoff',
+        'yfd': 'Kickoff',
     }
 
 
@@ -283,18 +287,18 @@ def parse_penalty(play):
         if new_yard_line > 50:
             new_yard_line = 50 - (new_yard_line - 50)
 
-        distance_func = sub if team == play['team_on_defense'] else add
-        distance = distance_func(play['yfd'], + loss)
-        if distance <= 0:
+        yfd_func = sub if team == play['team_on_defense'] else add
+        yfd = yfd_func(play['yfd'], + loss)
+        if yfd <= 0:
             down = 1
-            distance = 10
+            yfd = 10
         else:
             down = play['down']
 
         return {
             'yard_line': new_yard_line,
             'down': down,
-            'distance': distance,
+            'yfd': yfd,
         }
     except (AttributeError):
         pass
@@ -308,7 +312,7 @@ def touchdown(play):
     return {
         'yard_line': 'Extra Point Conversion',
         'down': 'Extra Point Conversion',
-        'distance': 'Extra Point Conversion',
+        'yfd': 'Extra Point Conversion',
     }
 
 
@@ -329,6 +333,14 @@ def parse_play(play):
     new_data['score'] = play['score']
     new_data['quarter'] = play['quarter']
     new_data['side'] = play['side']
+
+    if play['play_type'] == 'rush' and play.get('distance') is None:
+        try:
+            summary = play['summary']
+            yards_gained = parse_number_from_summary(summary, YARD_GAIN_PAT)
+            play['distance'] = 'Long' if yards_gained > 11 else 'Short'
+        except ValueError:
+            pass
     return play, new_data
 
 
